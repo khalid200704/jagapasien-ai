@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -32,35 +33,77 @@ def _resolve_first_existing(directory: Path, names: List[str]) -> Optional[Path]
     return None
 
 
+def _candidate_files(directory: Path, names: List[str]) -> List[Path]:
+    matches: List[Path] = []
+    for name in names:
+        path = directory / name
+        if path.exists():
+            matches.append(path)
+    return matches
+
+
 def choose_dataset_files(directory: Path = ROOT_DIR) -> Dict[str, Path]:
     files: Dict[str, Path] = {}
     alias_map = {
         "candidate": [
             "hasil_jagapasien_ai.csv",
             "hasil_jagapasien_ai(1).csv",
+            "hasil_jagapasien_ai(2).csv",
+            "hasil_jagapasien_ai(3).csv",
             "kandidat_review.csv",
             "kandidat_review(1).csv",
+            "kandidat_review(2).csv",
+            "kandidat_review(3).csv",
         ],
         "pairs": [
             "pasangan_kunjungan.csv",
             "pasangan_kunjungan(1).csv",
+            "pasangan_kunjungan(2).csv",
+            "pasangan_kunjungan(3).csv",
         ],
         "patients": [
             "pasien_sintetis.csv",
             "pasien_sintetis(1).csv",
+            "pasien_sintetis(2).csv",
+            "pasien_sintetis(3).csv",
         ],
         "visits": [
             "kunjungan_sintetis.csv",
             "kunjungan_sintetis(1).csv",
+            "kunjungan_sintetis(2).csv",
+            "kunjungan_sintetis(3).csv",
         ],
         "metadata": ["metadata.json"],
         "training_summary": ["ringkasan_training.json"],
     }
 
+    search_roots = [directory, directory / "data"]
     for key, candidates in alias_map.items():
-        resolved = _resolve_first_existing(directory, candidates)
-        if resolved is not None:
-            files[key] = resolved
+        chosen: Optional[Path] = None
+        for root_dir in search_roots:
+            if not root_dir.exists():
+                continue
+            resolved = _resolve_first_existing(root_dir, candidates)
+            if resolved is not None:
+                chosen = resolved
+                break
+        if chosen is None:
+            continue
+
+        if key in {"candidate", "pairs", "patients", "visits"}:
+            all_matches = []
+            for root_dir in search_roots:
+                if root_dir.exists():
+                    for path in _candidate_files(root_dir, candidates):
+                        if path not in all_matches:
+                            all_matches.append(path)
+            if len(all_matches) > 1:
+                warnings.warn(
+                    f"Beberapa file dataset {key!r} ditemukan di workspace; memilih {chosen.name} di {chosen.parent}. "
+                    "Aturan pemilihan bersifat deterministik dan dapat dikonfigurasi secara eksplisit bila versi data berbeda.",
+                    UserWarning,
+                )
+        files[key] = chosen
     return files
 
 

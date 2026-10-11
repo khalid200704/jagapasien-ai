@@ -1,12 +1,61 @@
 from __future__ import annotations
 
+import warnings
 from typing import Any, Dict, Iterable, List, Optional
 
 import pandas as pd
 
 
+def _normalize_boolean_value(value: Any) -> bool:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return False
+    if isinstance(value, (bool, pd.BooleanDtype)):
+        return bool(value)
+    if isinstance(value, (int, float)):
+        if pd.isna(value):
+            return False
+        if value in (0, 0.0):
+            return False
+        if value in (1, 1.0):
+            return True
+        raise ValueError(f"Nilai boolean tidak valid: {value!r}")
+    if isinstance(value, str):
+        cleaned = value.strip().lower()
+        if cleaned in {"", "na", "n/a", "null", "none"}:
+            return False
+        mapping = {
+            "true": True,
+            "false": False,
+            "ya": True,
+            "tidak": False,
+            "yes": True,
+            "no": False,
+            "1": True,
+            "0": False,
+            "y": True,
+            "n": False,
+        }
+        if cleaned in mapping:
+            return mapping[cleaned]
+        warnings.warn(f"Nilai boolean tidak dikenal diubah menjadi False: {value!r}", UserWarning)
+        return False
+    if pd.isna(value):
+        return False
+    warnings.warn(f"Nilai boolean tidak dikenal diubah menjadi False: {value!r}", UserWarning)
+    return False
+
+
 def safe_bool(series: pd.Series) -> pd.Series:
-    return series.fillna(False).astype(bool)
+    if series is None:
+        return pd.Series(dtype=bool)
+    values = []
+    for value in series:
+        try:
+            values.append(_normalize_boolean_value(value))
+        except ValueError as exc:
+            warnings.warn(str(exc), UserWarning)
+            values.append(False)
+    return pd.Series(values, index=series.index, dtype=bool)
 
 
 def get_priority_order(priority_values: Iterable[str]) -> List[str]:
@@ -18,20 +67,40 @@ def get_priority_order(priority_values: Iterable[str]) -> List[str]:
     return ordered
 
 
-def summarize_kpis(candidates: pd.DataFrame, pairs: pd.DataFrame, patients: pd.DataFrame) -> Dict[str, Any]:
-    candidate_count = len(candidates)
-    pair_count = len(pairs)
-    patient_count = len(patients)
-    candidate_unique_patients = candidates["patient_id"].nunique() if "patient_id" in candidates.columns else 0
-    visit_unique_encounters = pairs["encounter_1"].nunique() + pairs["encounter_2"].nunique() if {"encounter_1", "encounter_2"}.issubset(pairs.columns) else 0
+def summarize_kpis(candidates: pd.DataFrame, pairs: pd.DataFrame, patients: pd.DataFrame, visits: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+    candidate_count = len(candidates) if isinstance(candidates, pd.DataFrame) else 0
+    pair_count = len(pairs) if isinstance(pairs, pd.DataFrame) else 0
+    patient_count = len(patients) if isinstance(patients, pd.DataFrame) else 0
+    visit_count = len(visits) if isinstance(visits, pd.DataFrame) else 0
+
+    candidate_unique_patients = 0
+    if isinstance(candidates, pd.DataFrame) and "patient_id" in candidates.columns:
+        candidate_unique_patients = int(candidates["patient_id"].dropna().astype(str).nunique())
+
+    encounter_values: List[str] = []
+    if isinstance(pairs, pd.DataFrame):
+        for col in ["encounter_1", "encounter_2"]:
+            if col in pairs.columns:
+                encounter_values.append(pairs[col].dropna().astype(str))
+    if encounter_values:
+        encounter_unique = pd.concat(encounter_values, ignore_index=True).dropna().astype(str).unique()
+        encounter_unique_count = len(encounter_unique)
+    else:
+        encounter_unique_count = 0
+
+    if isinstance(pairs, pd.DataFrame) and "pengecualian_klinis" in pairs.columns:
+        pengecualian_count = int(safe_bool(pairs["pengecualian_klinis"]).sum())
+    else:
+        pengecualian_count = 0
+
     return {
         "total_pasien": patient_count,
-        "total_kunjungan": len(patients) if "patient_id" in patients.columns else 0,
+        "total_kunjungan": visit_count,
         "total_pasangan_dianalisis": pair_count,
         "total_kandidat_review": candidate_count,
-        "pasangan_dengan_pengecualian": int(pairs["pengecualian_klinis"].fillna(False).astype(bool).sum()) if "pengecualian_klinis" in pairs.columns else 0,
+        "pasangan_dengan_pengecualian": pengecualian_count,
         "pasien_unik_kandidat": candidate_unique_patients,
-        "encounter_unik_total": visit_unique_encounters,
+        "encounter_unik_total": encounter_unique_count,
     }
 
 
@@ -50,13 +119,13 @@ def facility_distribution(df: pd.DataFrame) -> pd.Series:
 def distance_distribution(df: pd.DataFrame) -> pd.Series:
     if "jarak_hari" not in df.columns:
         return pd.Series(dtype=float)
-    return pd.Series(df["jarak_hari"].dropna().astype(float))
+    return pd.Series(pd.to_numeric(df["jarak_hari"], errors="coerce").dropna())
 
 
 def percentile_distribution(df: pd.DataFrame) -> pd.Series:
     if "persentil_anomali" not in df.columns:
         return pd.Series(dtype=float)
-    return pd.Series(df["persentil_anomali"].dropna().astype(float))
+    return pd.Series(pd.to_numeric(df["persentil_anomali"], errors="coerce").dropna())
 
 
 def filter_candidates(
@@ -69,30 +138,72 @@ def filter_candidates(
     date_to: Optional[str] = None,
     search: Optional[str] = None,
 ) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame(columns=df.columns if isinstance(df, pd.DataFrame) else [])
+
     result = df.copy()
-    if priority:
-        result = result[result["prioritas"].astype(str).str.lower() == str(priority).lower()]
-    if faskes:
-        result = result[result["faskes"].astype(str).str.lower() == str(faskes).lower()]
-    if patient_id:
-        result = result[result["patient_id"].astype(str).str.lower() == str(patient_id).lower()]
-    if case_id:
-        result = result[result["case_id"].astype(str).str.lower() == str(case_id).lower()]
-    if search:
-        token = str(search).lower()
-        fields = [col for col in ["case_id", "patient_id", "faskes", "alasan", "status_review"] if col in result.columns]
-        mask = pd.Series(False, index=result.index)
-        for field in fields:
-            mask |= result[field].fillna("").astype(str).str.lower().str.contains(token, na=False)
+
+    if priority is not None:
+        priority_value = str(priority).strip().lower()
+        if "prioritas" in result.columns:
+            result = result[result["prioritas"].fillna("").astype(str).str.strip().str.lower().eq(priority_value)]
+        else:
+            return result.iloc[0:0].copy()
+
+    if faskes is not None:
+        faskes_value = str(faskes).strip().lower()
+        if "faskes" in result.columns:
+            result = result[result["faskes"].fillna("").astype(str).str.strip().str.lower().eq(faskes_value)]
+        else:
+            return result.iloc[0:0].copy()
+
+    if patient_id is not None:
+        patient_value = str(patient_id).strip().lower()
+        if "patient_id" in result.columns:
+            result = result[result["patient_id"].fillna("").astype(str).str.strip().str.lower().eq(patient_value)]
+        else:
+            return result.iloc[0:0].copy()
+
+    if case_id is not None:
+        case_value = str(case_id).strip().lower()
+        if "case_id" in result.columns:
+            result = result[result["case_id"].fillna("").astype(str).str.strip().str.lower().eq(case_value)]
+        else:
+            return result.iloc[0:0].copy()
+
+    if search is not None:
+        token = str(search).strip().lower()
+        if token:
+            fields = [col for col in ["case_id", "patient_id", "faskes", "alasan", "status_review"] if col in result.columns]
+            mask = pd.Series(False, index=result.index)
+            for field in fields:
+                mask |= result[field].fillna("").astype(str).str.lower().str.contains(token, regex=False, na=False)
+            result = result[mask]
+
+    if date_from is not None or date_to is not None:
+        if "tanggal_1" not in result.columns and "tanggal_2" not in result.columns:
+            return result.iloc[0:0].copy()
+
+        start_dt = pd.to_datetime(date_from, errors="coerce") if date_from else pd.NaT
+        end_dt = pd.to_datetime(date_to, errors="coerce") if date_to else pd.NaT
+        if date_from is not None and pd.isna(start_dt):
+            raise ValueError(f"Tanggal mulai tidak valid: {date_from!r}")
+        if date_to is not None and pd.isna(end_dt):
+            raise ValueError(f"Tanggal akhir tidak valid: {date_to!r}")
+        if pd.notna(start_dt) and pd.notna(end_dt) and start_dt > end_dt:
+            raise ValueError("Tanggal mulai tidak boleh lebih besar daripada tanggal akhir.")
+
+        start_series = pd.to_datetime(result["tanggal_1"], errors="coerce") if "tanggal_1" in result.columns else pd.Series(pd.NaT, index=result.index)
+        end_series = pd.to_datetime(result["tanggal_2"], errors="coerce") if "tanggal_2" in result.columns else pd.Series(pd.NaT, index=result.index)
+        pair_start = start_series.combine(end_series, min)
+
+        mask = pd.Series(True, index=result.index)
+        if pd.notna(start_dt):
+            mask &= pair_start >= start_dt
+        if pd.notna(end_dt):
+            mask &= pair_start <= end_dt
         result = result[mask]
-    if date_from and "tanggal_1" in result.columns:
-        date_from = pd.to_datetime(date_from, errors="coerce")
-        if pd.notna(date_from):
-            result = result[pd.to_datetime(result["tanggal_1"], errors="coerce") >= date_from]
-    if date_to and "tanggal_2" in result.columns:
-        date_to = pd.to_datetime(date_to, errors="coerce")
-        if pd.notna(date_to):
-            result = result[pd.to_datetime(result["tanggal_2"], errors="coerce") <= date_to]
+
     return result.reset_index(drop=True)
 
 
@@ -126,18 +237,32 @@ def classify_findings(df: pd.DataFrame) -> Dict[str, int]:
 
     dup_mask = safe_bool(df["kemungkinan_duplikasi"]) if "kemungkinan_duplikasi" in df.columns else pd.Series(False, index=df.index)
     except_mask = safe_bool(df["pengecualian_klinis"]) if "pengecualian_klinis" in df.columns else pd.Series(False, index=df.index)
-    diag_same_mask = df["diagnosis_sama"].fillna(0).astype(int).eq(1) if "diagnosis_sama" in df.columns else pd.Series(False, index=df.index)
-    same_faskes_mask = pd.Series(True, index=df.index)
-    if "faskes" in df.columns:
-        same_faskes_mask = df["faskes"].notna()
-    continuity_mask = diag_same_mask & (df["jarak_hari"].fillna(0).astype(int) <= 14) if "jarak_hari" in df.columns else pd.Series(False, index=df.index)
-    adjacent_limit_mask = (df["jarak_hari"].fillna(0).astype(int) <= 7) & (~dup_mask) if "jarak_hari" in df.columns else pd.Series(False, index=df.index)
+    diag_same_mask = safe_bool(df["diagnosis_sama"]) if "diagnosis_sama" in df.columns else pd.Series(False, index=df.index)
 
-    counts["potensi_duplikasi_dokumentasi"] = int(dup_mask.sum())
-    counts["pengecualian_klinis"] = int(except_mask.sum())
-    counts["kesinambungan_episode_perlu_telaah"] = int(continuity_mask.sum())
-    counts["kunjungan_berdekatan_bukti_terbatas"] = int(adjacent_limit_mask.sum())
-    counts["belum_dapat_diklasifikasikan"] = int((~dup_mask & ~except_mask & ~continuity_mask & ~adjacent_limit_mask).sum())
+    if "jarak_hari" in df.columns:
+        distance_values = pd.to_numeric(df["jarak_hari"], errors="coerce")
+    else:
+        distance_values = pd.Series(pd.NaN, index=df.index)
+
+    continuity_mask = pd.Series(False, index=df.index)
+    nearby_mask = pd.Series(False, index=df.index)
+    if len(df) > 0:
+        continuity_mask = diag_same_mask & distance_values.notna() & (distance_values > 0) & (distance_values <= 14)
+        nearby_mask = distance_values.notna() & (distance_values > 0) & (distance_values <= 7) & (~dup_mask)
+
+    for idx in range(len(df)):
+        if except_mask.iloc[idx]:
+            category = "pengecualian_klinis"
+        elif dup_mask.iloc[idx]:
+            category = "potensi_duplikasi_dokumentasi"
+        elif continuity_mask.iloc[idx]:
+            category = "kesinambungan_episode_perlu_telaah"
+        elif nearby_mask.iloc[idx]:
+            category = "kunjungan_berdekatan_bukti_terbatas"
+        else:
+            category = "belum_dapat_diklasifikasikan"
+        counts[category] += 1
+
     return counts
 
 

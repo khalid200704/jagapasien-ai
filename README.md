@@ -102,6 +102,12 @@ Aplikasi akan terbuka di browser secara lokal. Jika port default sudah terpakai,
 4. Gunakan halaman Analisis Temuan untuk melihat kelompok temuan indikatif.
 5. Baca halaman Metodologi AI agar pemahaman tentang scoping dan batasan jelas.
 
+## Status operasi dan batasan dashboard
+- Aplikasi ini merupakan dashboard analitik berbasis CSV, bukan generator data atau trainer model yang menulis ulang output utama.
+- Dashboard membaca file CSV yang sudah tersedia di workspace, lalu menampilkan KPI, filter, dan timeline; tidak ada proses auto-generate yang menimpa hasil_jagapasien_ai.csv, metadata, atau ringkasan_training.json.
+- Saat terdapat beberapa file varian bernomor (misalnya hasil_jagapasien_ai(1).csv), loader memilih file yang paling sesuai secara deterministik dan memperingatkan bila ada duplikasi versi data di workspace.
+- Semua hasil ditafsirkan sebagai indikasi telaah awal, bukan bukti fraud atau keputusan klinis.
+
 ## Hasil eksperimen yang terverifikasi
 - Data sintetis yang tersedia berhasil dibaca pada workspace lokal.
 - Jumlah kandidat hasil analisis: 6.114 baris pada file hasil_jagapasien_ai.csv.

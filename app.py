@@ -14,6 +14,7 @@ from src.jagapasien.analysis import (
     find_case_by_id,
     get_priority_order,
     priority_distribution,
+    safe_bool,
     summarize_kpis,
 )
 from src.jagapasien.data_loader import load_datasets
@@ -31,7 +32,7 @@ ROOT_DIR = Path(__file__).resolve().parent
 st.set_page_config(page_title="JagaPasien AI", page_icon="🩺", layout="wide")
 
 def render_overview(candidates: pd.DataFrame, pairs: pd.DataFrame, patients: pd.DataFrame, visits: pd.DataFrame) -> None:
-    kpis = summarize_kpis(candidates, pairs, patients)
+    kpis = summarize_kpis(candidates, pairs, patients, visits)
     st.subheader("Ringkasan eksekutif")
     col1, col2, col3, col4, col5 = st.columns(5)
     info_cards = [
@@ -200,7 +201,7 @@ def render_analysis(candidates: pd.DataFrame, pairs: pd.DataFrame) -> None:
     )
 
     if "pengecualian_klinis" in pairs.columns:
-        st.write(f"Jumlah kasus dengan pengecualian klinis di data pasangan: {pairs['pengecualian_klinis'].fillna(False).astype(bool).sum():,}")
+        st.write(f"Jumlah kasus dengan pengecualian klinis di data pasangan: {safe_bool(pairs['pengecualian_klinis']).sum():,}")
     else:
         st.write("Kategori pengecualian klinis belum tersedia dalam CSV kandidat.")
 
