@@ -127,9 +127,7 @@ Semua data yang digunakan pada prototipe bersifat sintetis dan bukan data rekam 
 - Pemetaan output ke protokol audit manual yang lebih kuat.
 
 ## Placeholder identitas
-- Nama pemilik: [NAMA PEMILIK]
-- Nama tim: [NAMA TIM]
-- URL GitHub: [URL GITHUB]
+- Nama pemilik: ankha
 
 ## Disclaimer
 JagaPasien AI merupakan prototipe berbasis data sintetis untuk mendukung telaah pola kunjungan. Sistem tidak digunakan untuk menetapkan fraud, mengambil keputusan klaim, atau menggantikan penilaian klinis.
