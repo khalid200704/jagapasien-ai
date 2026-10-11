@@ -1,0 +1,16 @@
+{
+  "pasien": 10000,
+  "kunjungan": 35009,
+  "pasangan_dianalisis": 13149,
+  "pasangan_dengan_pengecualian": 4749,
+  "kandidat_review": 6114,
+  "prioritas": {
+    "Sedang": 5210,
+    "Rendah": 609,
+    "Tinggi": 295
+  },
+  "model": "Isolation Forest",
+  "label_fraud_aktual": false,
+  "validasi_klinis": false,
+  "tipe_data": "SINTETIS"
+}
